@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "BubatzFM-project.zip"
+      - "BubatzFM_v0.13_android_project.zip"
       - ".github/workflows/build-apk.yml"
 
 jobs:
