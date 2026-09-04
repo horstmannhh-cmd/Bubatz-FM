@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "BubatzFM_v0.13_android_project.zip"
+      - "BubatzFM_v*.zip"
       - ".github/workflows/build-apk.yml"
 
 jobs:
@@ -25,25 +25,40 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Android Platform 35 installieren
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        run: sdkmanager "platforms;android-35" "build-tools;34.0.0"
 
       - name: Gradle einrichten
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10.2"
 
-      - name: Projekt entpacken
+      - name: Neueste Bubatz-FM-Version entpacken
+        shell: bash
         run: |
+          ZIP="$(ls BubatzFM_v*.zip | sort -V | tail -n 1)"
+          echo "Verwende: $ZIP"
           rm -rf build-src
           mkdir build-src
-          unzip -q BubatzFM-project.zip -d build-src
+          unzip -q "$ZIP" -d build-src
+          PROJECT_DIR="$(dirname "$(find build-src -name settings.gradle.kts -print -quit)")"
+          test -n "$PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Projekt prüfen
+        shell: bash
+        run: |
+          if [ -f "$PROJECT_DIR/tools/sanity_check.py" ]; then
+            python3 "$PROJECT_DIR/tools/sanity_check.py"
+          fi
 
       - name: APK bauen
-        working-directory: build-src
-        run: gradle --no-daemon assembleDebug
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          gradle --no-daemon assembleDebug
 
       - name: APK bereitstellen
         uses: actions/upload-artifact@v4
         with:
           name: Bubatz-FM-debug-apk
-          path: build-src/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
