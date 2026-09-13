@@ -78,7 +78,22 @@ jobs:
           # 3) Falls nur der Workflow selbst geÃ¤ndert wurde:
           #    die zuletzt COMMITTETE BubatzFM-ZIP nehmen, nicht nach Dateinamen sortieren.
           if [ -z "$ZIP" ]; then
-            ZIP="$(git log --diff-filter=AM --name-only --pretty=format: -- 'BubatzFM_v*.zip' | awk '/^BubatzFM_v.*\.zip$/ { print; exit }')"
+            ZIP_COMMIT="$(git log -1 --format=%H -- 'BubatzFM_v*.zip')"
+
+            if [ -n "$ZIP_COMMIT" ]; then
+              mapfile -t LAST_ZIPS < <(
+                git diff-tree --no-commit-id --name-only -r --diff-filter=AM "$ZIP_COMMIT" -- 'BubatzFM_v*.zip'
+              )
+
+              if [ "${#LAST_ZIPS[@]}" -eq 1 ]; then
+                ZIP="${LAST_ZIPS[0]}"
+              elif [ "${#LAST_ZIPS[@]}" -gt 1 ]; then
+                echo "Fehler: Der letzte ZIP-Commit enthÃ¤lt mehrere BubatzFM-ZIPs:"
+                printf '  %s\n' "${LAST_ZIPS[@]}"
+                echo "Bitte den Workflow manuell mit zip_name starten."
+                exit 1
+              fi
+            fi
           fi
 
           if [ -z "$ZIP" ] || [ ! -f "$ZIP" ]; then
