@@ -2,6 +2,11 @@ name: Build Bubatz FM APK
 
 on:
   workflow_dispatch:
+    inputs:
+      zip_name:
+        description: "Optional: exakter ZIP-Dateiname, der gebaut werden soll"
+        required: false
+        type: string
   push:
     paths:
       - "BubatzFM_v*.zip"
@@ -14,6 +19,8 @@ jobs:
     steps:
       - name: Repository laden
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Java 17 einrichten
         uses: actions/setup-java@v4
@@ -32,28 +39,99 @@ jobs:
         with:
           gradle-version: "8.10.2"
 
-      - name: Neueste Bubatz-FM-Version entpacken
+      - name: Zu bauende Bubatz-FM-Version bestimmen
+        id: choose_zip
+        shell: bash
+        env:
+          MANUAL_ZIP: ${{ github.event.inputs.zip_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          ZIP=""
+
+          # 1) Bei manuellem Start kann ein exakter Dateiname vorgegeben werden.
+          if [ -n "${MANUAL_ZIP:-}" ]; then
+            ZIP="$MANUAL_ZIP"
+          fi
+
+          # 2) Bei einem Push genau die in diesem Commit neu hinzugefÃ¼gte/geÃ¤nderte ZIP verwenden.
+          if [ -z "$ZIP" ] && [ "${{ github.event_name }}" = "push" ]; then
+            if [ -n "${BEFORE_SHA:-}" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+              mapfile -t CHANGED_ZIPS < <(
+                git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" -- 'BubatzFM_v*.zip' |
+                grep -E '^BubatzFM_v.*\.zip$' || true
+              )
+
+              if [ "${#CHANGED_ZIPS[@]}" -eq 1 ]; then
+                ZIP="${CHANGED_ZIPS[0]}"
+              elif [ "${#CHANGED_ZIPS[@]}" -gt 1 ]; then
+                echo "Fehler: In diesem Push wurden mehrere BubatzFM-ZIPs geÃ¤ndert:"
+                printf '  %s\n' "${CHANGED_ZIPS[@]}"
+                echo "Bitte pro Push nur eine neue Projekt-ZIP hochladen oder den Workflow manuell mit zip_name starten."
+                exit 1
+              fi
+            fi
+          fi
+
+          # 3) Falls nur der Workflow selbst geÃ¤ndert wurde:
+          #    die zuletzt COMMITTETE BubatzFM-ZIP nehmen, nicht nach Dateinamen sortieren.
+          if [ -z "$ZIP" ]; then
+            ZIP="$(
+              git log --diff-filter=AM --name-only --pretty=format: -- 'BubatzFM_v*.zip' |
+              grep -E '^BubatzFM_v.*\.zip$' |
+              head -n 1
+            )"
+          fi
+
+          if [ -z "$ZIP" ] || [ ! -f "$ZIP" ]; then
+            echo "Fehler: Keine gÃ¼ltige BubatzFM-Projekt-ZIP gefunden."
+            exit 1
+          fi
+
+          echo "=============================================="
+          echo "BAUE EXAKT DIESE ZIP:"
+          echo "$ZIP"
+          echo "=============================================="
+
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Bubatz-FM-Projekt entpacken
         shell: bash
         run: |
-          ZIP="$(ls BubatzFM_v*.zip | sort -V | tail -n 1)"
-          echo "Verwende: $ZIP"
+          set -euo pipefail
           rm -rf build-src
           mkdir build-src
           unzip -q "$ZIP" -d build-src
-          PROJECT_DIR="$(dirname "$(find build-src -name settings.gradle.kts -print -quit)")"
-          test -n "$PROJECT_DIR"
+
+          SETTINGS_FILE="$(find build-src -name settings.gradle.kts -print -quit)"
+          test -n "$SETTINGS_FILE"
+
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Projekt prüfen
+          echo "Projektordner: $PROJECT_DIR"
+
+      - name: Projekt prÃ¼fen
         shell: bash
         run: |
+          set -euo pipefail
+          echo "Verwendete ZIP: $ZIP"
+          echo "Projektordner: $PROJECT_DIR"
+
           if [ -f "$PROJECT_DIR/tools/sanity_check.py" ]; then
             python3 "$PROJECT_DIR/tools/sanity_check.py"
           fi
 
+          echo "Versionsangaben im App-Build:"
+          grep -nE 'versionCode|versionName' "$PROJECT_DIR/app/build.gradle.kts" || true
+
       - name: APK bauen
         shell: bash
         run: |
+          set -euo pipefail
           cd "$PROJECT_DIR"
           gradle --no-daemon assembleDebug
 
