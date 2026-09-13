@@ -78,11 +78,7 @@ jobs:
           # 3) Falls nur der Workflow selbst geÃ¤ndert wurde:
           #    die zuletzt COMMITTETE BubatzFM-ZIP nehmen, nicht nach Dateinamen sortieren.
           if [ -z "$ZIP" ]; then
-            ZIP="$(
-              git log --diff-filter=AM --name-only --pretty=format: -- 'BubatzFM_v*.zip' |
-              grep -E '^BubatzFM_v.*\.zip$' |
-              head -n 1
-            )"
+            ZIP="$(git log --diff-filter=AM --name-only --pretty=format: -- 'BubatzFM_v*.zip' | awk '/^BubatzFM_v.*\.zip$/ { print; exit }')"
           fi
 
           if [ -z "$ZIP" ] || [ ! -f "$ZIP" ]; then
